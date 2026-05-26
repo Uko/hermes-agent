@@ -1,12 +1,36 @@
 """Tests for hermes_cli.gateway."""
 
 import sys
+import json
 from types import ModuleType, SimpleNamespace
 from unittest.mock import patch, call
 
 import pytest
 
 import hermes_cli.gateway as gateway
+
+
+def test_restart_message_from_args_supports_flag_and_trailing_words():
+    assert (
+        gateway._restart_message_from_args(SimpleNamespace(message=" deploy profile isolation "))
+        == "deploy profile isolation"
+    )
+    assert (
+        gateway._restart_message_from_args(
+            SimpleNamespace(message=None, message_words=["update", "R2", "config"])
+        )
+        == "update R2 config"
+    )
+    assert gateway._restart_message_from_args(SimpleNamespace(message=None, message_words=[])) is None
+
+
+def test_write_cli_restart_message_marker(tmp_path, monkeypatch):
+    monkeypatch.setattr(gateway, "get_hermes_home", lambda: tmp_path)
+
+    gateway._write_cli_restart_message_marker("deploy profile workspace policy")
+
+    data = json.loads((tmp_path / ".restart_notify.json").read_text())
+    assert data == {"message": "deploy profile workspace policy"}
 
 
 def _install_fake_gateway_run(monkeypatch, start_gateway):

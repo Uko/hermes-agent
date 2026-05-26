@@ -43,6 +43,7 @@ _PROFILE_DIRS = [
     "logs",
     "plans",
     "workspace",
+    "document_cache",
     "cron",
     # Per-profile HOME for subprocesses: isolates system tool configs (git,
     # ssh, gh, npm …) so credentials don't bleed between profiles.  In Docker
@@ -74,6 +75,70 @@ _CLONE_ALL_STRIP: list[str] = [
     "gateway_state.json",
     "processes.json",
 ]
+
+
+def _write_workspace_policy(profile_dir: Path, profile_name: str) -> None:
+    """Write a local AGENTS.md policy for profile-owned workspace output.
+
+    Best-effort only: profile creation should not fail just because the policy
+    note could not be written.  Gateways also default TERMINAL_CWD to this
+    workspace, so this file is loaded automatically as project context.
+    """
+    try:
+        workspace = profile_dir / "workspace"
+        document_cache = profile_dir / "document_cache"
+        workspace.mkdir(parents=True, exist_ok=True)
+        document_cache.mkdir(parents=True, exist_ok=True)
+        policy_path = workspace / "AGENTS.md"
+        if policy_path.exists():
+            return
+        policy_path.write_text(
+            f"# {profile_name} workspace policy\n\n"
+            f"This directory is {profile_name}'s default working area.\n\n"
+            "- Create task artifacts, scratch files, downloaded documents, "
+            "generated reports, temporary scripts, and caches under this "
+            f"profile-local workspace or another explicit subdirectory of `{profile_dir}/`.\n"
+            f"- Prefer `{document_cache}/` for document/download caches.\n"
+            "- Do not create new project/task directories directly under the "
+            "OS user home unless the user explicitly asks for that exact path.\n"
+            "- If a task must touch a real project outside this profile, use "
+            "the existing project path the user supplied; do not invent a new "
+            "top-level home directory.\n"
+            "- Before writing large or durable artifacts outside this profile, "
+            "state the intended path and get approval.\n",
+            encoding="utf-8",
+        )
+    except Exception:
+        pass
+
+
+def _ensure_profile_workspace_cwd(profile_dir: Path) -> None:
+    """Point cloned profile configs at their own workspace, not the source's.
+
+    Fresh profiles may not have a config.yaml yet; gateway fallback still uses
+    ``profile_dir/workspace`` in that case. Cloned profiles do have a config,
+    and without this rewrite an absolute ``terminal.cwd`` from the source could
+    make a future agent write into another profile's workspace.
+    """
+    config_path = profile_dir / "config.yaml"
+    if not config_path.exists():
+        return
+    try:
+        import yaml
+
+        with config_path.open("r", encoding="utf-8") as f:
+            config = yaml.safe_load(f) or {}
+        if not isinstance(config, dict):
+            return
+        terminal_cfg = config.setdefault("terminal", {})
+        if not isinstance(terminal_cfg, dict):
+            terminal_cfg = {}
+            config["terminal"] = terminal_cfg
+        terminal_cfg["cwd"] = str(profile_dir / "workspace")
+        with config_path.open("w", encoding="utf-8") as f:
+            yaml.safe_dump(config, f, sort_keys=False, allow_unicode=True)
+    except Exception:
+        pass
 
 # Infrastructure artifacts excluded from --clone-all when the source is the
 # default profile (``~/.hermes``).  Named profiles never contain these
@@ -786,6 +851,9 @@ def create_profile(
             )
         except Exception:
             pass  # non-fatal — user can describe later with `hermes profile describe`
+
+    _write_workspace_policy(profile_dir, canon)
+    _ensure_profile_workspace_cwd(profile_dir)
 
     # Phase 4: when running inside a container under s6, register the
     # new profile's gateway as a runtime s6 service so

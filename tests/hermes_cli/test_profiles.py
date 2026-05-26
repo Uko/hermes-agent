@@ -156,8 +156,17 @@ class TestCreateProfile:
         profile_dir = create_profile("coder", no_alias=True)
         assert profile_dir.is_dir()
         for subdir in ["memories", "sessions", "skills", "skins", "logs",
-                        "plans", "workspace", "cron"]:
+                        "plans", "workspace", "document_cache", "cron"]:
             assert (profile_dir / subdir).is_dir(), f"Missing subdir: {subdir}"
+
+    def test_creates_workspace_policy(self, profile_env):
+        profile_dir = create_profile("scribe", no_alias=True)
+        policy = profile_dir / "workspace" / "AGENTS.md"
+        assert policy.exists()
+        content = policy.read_text(encoding="utf-8")
+        assert "scribe's default working area" in content
+        assert str(profile_dir / "document_cache") in content
+        assert "Do not create new project/task directories directly under the OS user home" in content
 
     def test_duplicate_raises_file_exists(self, profile_env):
         create_profile("coder", no_alias=True)
@@ -182,9 +191,25 @@ class TestCreateProfile:
 
         profile_dir = create_profile("coder", clone_config=True, no_alias=True)
 
-        assert (profile_dir / "config.yaml").read_text() == "model: test"
+        import yaml
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert cfg["model"] == "test"
+        assert cfg["terminal"]["cwd"] == str(profile_dir / "workspace")
         assert (profile_dir / ".env").read_text() == "KEY=val"
         assert (profile_dir / "SOUL.md").read_text() == "Be helpful."
+
+    def test_clone_config_rewrites_terminal_cwd_to_profile_workspace(self, profile_env):
+        tmp_path = profile_env
+        default_home = tmp_path / ".hermes"
+        (default_home / "config.yaml").write_text(
+            "model:\n  default: gpt-5\nterminal:\n  backend: local\n  cwd: /source/workspace\n"
+        )
+
+        profile_dir = create_profile("coder", clone_config=True, no_alias=True)
+
+        import yaml
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert cfg["terminal"]["cwd"] == str(profile_dir / "workspace")
 
     def test_clone_config_copies_source_skills(self, profile_env):
         tmp_path = profile_env
@@ -219,7 +244,10 @@ class TestCreateProfile:
 
         # Content should be copied
         assert (profile_dir / "memories" / "note.md").read_text() == "remember this"
-        assert (profile_dir / "config.yaml").read_text() == "model: gpt-4"
+        import yaml
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert cfg["model"] == "gpt-4"
+        assert cfg["terminal"]["cwd"] == str(profile_dir / "workspace")
         # Runtime files should be stripped
         assert not (profile_dir / "gateway.pid").exists()
         assert not (profile_dir / "gateway_state.json").exists()
@@ -294,7 +322,10 @@ class TestCreateProfile:
         assert not (profile_dir / "skills" / "my-skill" / "module.pyo").exists()
         # All profile data must be present
         assert (profile_dir / "skills" / "my-skill" / "SKILL.md").read_text() == "skill"
-        assert (profile_dir / "config.yaml").read_text() == "model: gpt-4"
+        import yaml
+        cfg = yaml.safe_load((profile_dir / "config.yaml").read_text())
+        assert cfg["model"] == "gpt-4"
+        assert cfg["terminal"]["cwd"] == str(profile_dir / "workspace")
         assert (profile_dir / ".env").read_text() == "KEY=val"
         assert (profile_dir / "state.db").read_text() == "sessions-data"
         assert (profile_dir / "sessions").exists()
@@ -1167,7 +1198,10 @@ class TestEdgeCases:
         target_dir = create_profile(
             "target", clone_from="source", clone_config=True, no_alias=True,
         )
-        assert (target_dir / "config.yaml").read_text() == "model: cloned"
+        import yaml
+        cfg = yaml.safe_load((target_dir / "config.yaml").read_text())
+        assert cfg["model"] == "cloned"
+        assert cfg["terminal"]["cwd"] == str(target_dir / "workspace")
         assert (target_dir / ".env").read_text() == "SECRET=yes"
 
     def test_delete_clears_active_profile(self, profile_env):

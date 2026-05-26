@@ -11298,6 +11298,16 @@ def main():
         action="store_true",
         help="Kill ALL gateway processes across all profiles before restarting",
     )
+    gateway_restart.add_argument(
+        "-m",
+        "--message",
+        help="Human-readable reason to include in active-chat interruption notices",
+    )
+    gateway_restart.add_argument(
+        "message_words",
+        nargs="*",
+        help="Optional human-readable reason to include in active-chat interruption notices",
+    )
 
     # gateway status
     gateway_status = gateway_subparsers.add_parser("status", help="Show gateway status")

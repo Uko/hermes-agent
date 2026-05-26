@@ -734,6 +734,28 @@ def _restart_notification_pending() -> bool:
     return (_hermes_home / ".restart_notify.json").exists()
 
 
+def _restart_user_message_from_text(text: Optional[str]) -> Optional[str]:
+    """Extract an operator-supplied restart message from `/restart <message>`.
+
+    Gateway command text can arrive as `/restart`, `/restart@BotName`, or with
+    arbitrary whitespace.  Keep the payload deliberately small: it is echoed to
+    every active chat in the shutdown notice, so this is an operator-facing
+    human explanation rather than an unbounded blob.
+    """
+    if not text:
+        return None
+    parts = str(text).strip().split(maxsplit=1)
+    if len(parts) < 2:
+        return None
+    command = parts[0].split("@", 1)[0].lstrip("/").lower()
+    if command != "restart":
+        return None
+    message = " ".join(parts[1].split())
+    if not message:
+        return None
+    return message[:500]
+
+
 # Mark this process as a gateway so cli.py's module-level load_cli_config()
 # knows not to clobber TERMINAL_CWD if lazily imported.
 os.environ["_HERMES_GATEWAY"] = "1"
@@ -1004,11 +1026,19 @@ os.environ["HERMES_EXEC_ASK"] = "1"
 # Set terminal working directory for messaging platforms.
 # config.yaml terminal.cwd is the canonical source (bridged to TERMINAL_CWD
 # by the config bridge above).  When it's unset or a placeholder, default
-# to home directory.  MESSAGING_CWD is accepted as a backward-compat
-# fallback (deprecated — the warning above tells users to migrate).
+# to a profile-local workspace instead of the OS home directory.  This keeps
+# agent-created scratch files, document caches, and generated artifacts inside
+# the active HERMES_HOME.  MESSAGING_CWD is accepted as a backward-compat
+# fallback only when explicitly provided (deprecated — the warning above tells
+# users to migrate).
 _configured_cwd = os.environ.get("TERMINAL_CWD", "")
 if not _configured_cwd or _configured_cwd in {".", "auto", "cwd"}:
-    _fallback = os.getenv("MESSAGING_CWD") or str(Path.home())
+    _profile_workspace = _hermes_home / "workspace"
+    try:
+        _profile_workspace.mkdir(parents=True, exist_ok=True)
+    except Exception:
+        pass
+    _fallback = os.getenv("MESSAGING_CWD") or str(_profile_workspace)
     os.environ["TERMINAL_CWD"] = _fallback
 
 from gateway.config import (
@@ -3364,6 +3394,18 @@ class GatewayRunner:
         """
         active = self._snapshot_running_agents()
 
+        restart_message = None
+        if self._restart_requested:
+            try:
+                notify_path = _hermes_home / ".restart_notify.json"
+                if notify_path.exists():
+                    notify_data = json.loads(notify_path.read_text())
+                    value = notify_data.get("message")
+                    if isinstance(value, str) and value.strip():
+                        restart_message = value.strip()
+            except Exception as e:
+                logger.debug("Failed to read restart operator message: %s", e)
+
         action = "restarting" if self._restart_requested else "shutting down"
         hint = (
             "Your current task will be interrupted. "
@@ -3372,6 +3414,8 @@ class GatewayRunner:
             else "Your current task will be interrupted."
         )
         msg = f"⚠️ Gateway {action} — {hint}"
+        if restart_message:
+            msg += f"\nReason: {restart_message}"
 
         notified: set[tuple[str, str, Optional[str]]] = set()
         for session_key in active:
@@ -9966,6 +10010,9 @@ class GatewayRunner:
             }
             if event.source.thread_id:
                 notify_data["thread_id"] = event.source.thread_id
+            restart_message = _restart_user_message_from_text(event.text)
+            if restart_message:
+                notify_data["message"] = restart_message
             atomic_json_write(
                 _hermes_home / ".restart_notify.json",
                 notify_data,
@@ -14346,6 +14393,7 @@ class GatewayRunner:
             platform_str = data.get("platform")
             chat_id = data.get("chat_id")
             thread_id = data.get("thread_id")
+            restart_message = data.get("message")
 
             if not platform_str or not chat_id:
                 return None
@@ -14368,9 +14416,12 @@ class GatewayRunner:
                 return None
 
             metadata = {"thread_id": thread_id} if thread_id else None
+            message = "♻ Gateway restarted successfully. Your session continues."
+            if isinstance(restart_message, str) and restart_message.strip():
+                message += f"\nReason: {restart_message.strip()}"
             result = await adapter.send(
                 str(chat_id),
-                "♻ Gateway restarted successfully. Your session continues.",
+                message,
                 metadata=metadata,
             )
             # adapter.send() catches provider errors (e.g. "Chat not found")

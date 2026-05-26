@@ -31,6 +31,7 @@ from hermes_cli.config import (
     read_raw_config,
     save_env_value,
 )
+from utils import atomic_json_write
 # display_hermes_home is imported lazily at call sites to avoid ImportError
 # when hermes_constants is cached from a pre-update version during `hermes update`.
 from hermes_cli.setup import (
@@ -2457,6 +2458,42 @@ def _get_restart_drain_timeout() -> float:
             )
         )
     return parse_restart_drain_timeout(raw)
+
+
+def _restart_message_from_args(args) -> str | None:
+    """Return a CLI-supplied restart explanation, if any."""
+    explicit = getattr(args, "message", None)
+    if isinstance(explicit, str) and explicit.strip():
+        message = explicit.strip()
+    else:
+        words = getattr(args, "message_words", None) or []
+        if isinstance(words, str):
+            message = words.strip()
+        else:
+            message = " ".join(str(word) for word in words).strip()
+    if not message:
+        return None
+    return " ".join(message.split())[:500]
+
+
+def _write_cli_restart_message_marker(message: str | None) -> None:
+    """Persist a CLI restart reason for the live gateway shutdown notice.
+
+    Unlike `/restart`, a CLI/service restart may not have an originating chat
+    to notify after startup. The marker can therefore contain only `message`;
+    gateway/run.py reads it during the pre-shutdown interruption notice and
+    cleans it up on the next boot.
+    """
+    if not message:
+        return
+    try:
+        atomic_json_write(
+            get_hermes_home() / ".restart_notify.json",
+            {"message": message},
+            indent=None,
+        )
+    except Exception as exc:
+        logger.debug("Failed to write CLI restart message marker: %s", exc)
 
 
 def systemd_install(
@@ -5413,6 +5450,8 @@ def _gateway_command_inner(args):
         service_available = False
         system = getattr(args, 'system', False)
         restart_all = getattr(args, 'all', False)
+        restart_message = _restart_message_from_args(args)
+        _write_cli_restart_message_marker(restart_message)
         service_configured = False
 
         # Phase 4: inside a container with s6, dispatch via the service

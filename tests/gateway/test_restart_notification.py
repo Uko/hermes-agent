@@ -33,6 +33,18 @@ def test_restart_notification_pending_true_with_marker(tmp_path, monkeypatch):
     assert gateway_run._restart_notification_pending() is True
 
 
+def test_restart_user_message_from_text_extracts_reason():
+    assert (
+        gateway_run._restart_user_message_from_text("/restart deploying profile workspace fix")
+        == "deploying profile workspace fix"
+    )
+    assert (
+        gateway_run._restart_user_message_from_text("/restart@Helios   updating agent permissions")
+        == "updating agent permissions"
+    )
+    assert gateway_run._restart_user_message_from_text("/restart") is None
+
+
 # ── _handle_restart_command writes .restart_notify.json ──────────────────
 
 
@@ -61,6 +73,28 @@ async def test_restart_command_writes_notify_file(tmp_path, monkeypatch):
     assert data["platform"] == "telegram"
     assert data["chat_id"] == "42"
     assert "thread_id" not in data  # no thread → omitted
+
+
+@pytest.mark.asyncio
+async def test_restart_command_persists_operator_message(tmp_path, monkeypatch):
+    """`/restart <message>` stores the human explanation for notifications."""
+    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
+
+    runner, _adapter = make_restart_runner()
+    runner.request_restart = MagicMock(return_value=True)
+
+    source = make_restart_source(chat_id="42")
+    event = MessageEvent(
+        text="/restart deploying the profile workspace policy",
+        message_type=MessageType.TEXT,
+        source=source,
+        message_id="m1",
+    )
+
+    await runner._handle_restart_command(event)
+
+    data = json.loads((tmp_path / ".restart_notify.json").read_text())
+    assert data["message"] == "deploying the profile workspace policy"
 
 
 @pytest.mark.asyncio
@@ -389,6 +423,28 @@ async def test_send_restart_notification_with_thread(tmp_path, monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_send_restart_notification_includes_operator_message(tmp_path, monkeypatch):
+    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
+
+    notify_path = tmp_path / ".restart_notify.json"
+    notify_path.write_text(json.dumps({
+        "platform": "telegram",
+        "chat_id": "42",
+        "message": "deploying the profile workspace policy",
+    }))
+
+    runner, adapter = make_restart_runner()
+    adapter.send = AsyncMock(return_value=SendResult(success=True, message_id="restart"))
+
+    await runner._send_restart_notification()
+
+    sent_text = adapter.send.call_args.args[1]
+    assert "Gateway restarted successfully" in sent_text
+    assert "Reason: deploying the profile workspace policy" in sent_text
+    assert not notify_path.exists()
+
+
+@pytest.mark.asyncio
 async def test_send_restart_notification_noop_when_no_file(tmp_path, monkeypatch):
     """Nothing happens if there's no pending restart notification."""
     monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
@@ -606,8 +662,16 @@ async def test_send_restart_notification_logs_info_on_sendresult_success(
 
 
 @pytest.mark.asyncio
-async def test_shutdown_notifications_use_cached_live_thread_source_when_origin_missing():
+async def test_shutdown_notifications_use_cached_live_thread_source_when_origin_missing(tmp_path, monkeypatch):
+    monkeypatch.setattr(gateway_run, "_hermes_home", tmp_path)
+    (tmp_path / ".restart_notify.json").write_text(json.dumps({
+        "platform": "telegram",
+        "chat_id": "requester",
+        "message": "deploying profile workspace isolation",
+    }))
+
     runner, adapter = make_restart_runner()
+    runner._restart_requested = True
     source = make_restart_source(chat_id="parent-42", chat_type="group", thread_id="topic-7")
     session_key = build_session_key(source)
 
@@ -620,6 +684,8 @@ async def test_shutdown_notifications_use_cached_live_thread_source_when_origin_
 
     adapter.send.assert_awaited_once_with(
         "parent-42",
-        "⚠️ Gateway shutting down — Your current task will be interrupted.",
+        "⚠️ Gateway restarting — Your current task will be interrupted. "
+        "Send any message after restart and I'll try to resume where you left off.\n"
+        "Reason: deploying profile workspace isolation",
         metadata={"thread_id": "topic-7"},
     )
