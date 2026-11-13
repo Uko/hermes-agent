@@ -340,6 +340,25 @@ def _tree_matches_completed_stamp(root: Path) -> bool:
     return info.commit == commit and not info.dirty
 
 
+def _prepare_launch_without_autofix(project_root: Path, argv: list[str]) -> Path | None:
+    """Select a managed interpreter without changing maintenance state."""
+    import os
+    import sys
+    from hermes_cli.steward import read_install_stamp
+
+    marker = Path(project_root) / ".update-incomplete"
+
+    if marker.is_file() or completion_pending_path(Path(project_root)).is_file():
+        print("hermes: update maintenance is pending; run `hermes update` explicitly", file=sys.stderr)
+    if read_install_stamp(Path(project_root)).get("updateMechanism") == "self":
+
+        from hermes_cli._launchers import resolve_store_python
+        python = resolve_store_python(Path(project_root))
+        if python is not None and os.path.normcase(os.path.abspath(python)) != os.path.normcase(os.path.abspath(sys.executable)):
+            return python
+    return None
+
+
 def prepare_launch(project_root: Path, argv: list[str]) -> Path | None:
     """Finish a self-managed source update before importing app dependencies.
 
@@ -353,6 +372,9 @@ def prepare_launch(project_root: Path, argv: list[str]) -> Path | None:
     re-run the tail (and its environment builds) on each boot until the disk fills.
     Return the store interpreter when this process must restart cleanly.
     """
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled():
+        return _prepare_launch_without_autofix(project_root, argv)
     import os
     import sys
 

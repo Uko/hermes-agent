@@ -56,11 +56,32 @@ def admit_plugin_set_change(
     expected_config: str | None = None,
     plugin: Optional[str] = None,
 ) -> None:
-    """PM discovers and validates the proposed union under its install lock.
+    """Save the proposed selection, preparing dependencies unless autofix is disabled.
 
-    No config or dependency selection is written by this application process. *plugin* names the
-    plugin being admitted so a resolver conflict is reported against it (:class:`DependencyConflict`).
+    With autofix enabled, PM validates the proposed union under its install lock.
+    *plugin* names the plugin reported in a resolver conflict (:class:`DependencyConflict`).
     """
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+
+    if startup_autofix_disabled():
+        from hermes_constants import get_hermes_home
+        from hermes_cli.config import atomic_config_write, require_readable_config_before_write
+        from pm.filesystem import file_digest
+
+        home = Path(active_plugins_dir).parent if active_plugins_dir is not None else get_hermes_home()
+        path = home / "config.yaml"
+        try:
+            if expected_config is not None and (file_digest(path) or "missing") != expected_config:
+                raise ValueError("Plugin configuration changed since this selection was read; retry.")
+            config = require_readable_config_before_write(path)
+            plugins = config.setdefault("plugins", {})
+            plugins["enabled"] = sorted(candidate_enabled)
+            plugins["disabled"] = sorted(candidate_disabled)
+            atomic_config_write(path, config)
+        except Exception as exc:
+            raise AdmissionRefused(str(exc)) from exc
+        return
+
     from hermes_constants import get_hermes_home
     from pm.client import sync_venv
     from pm.plugin_inputs import Selection

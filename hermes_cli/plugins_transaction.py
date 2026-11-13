@@ -22,6 +22,11 @@ def publish_plugin(staged: Path, target: Path, old_metadata: dict, new_metadata:
     ``security.allow_lazy_installs``): the active-replacement consent veto is
     skipped, so an unattended install carries that decision instead of being
     refused non-interactively."""
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled():
+        from hermes_cli.plugins_cmd import PluginOperationError
+        raise PluginOperationError("Plugin publication may prepare dependencies; HERMES_DISABLE_AUTOFIX is set. "
+                                   "Authorize the plugin operation with HERMES_DISABLE_AUTOFIX=0.")
     from pm.client import sync_venv
     from pm.plugin_inputs import StagedUpdate
     from pm.store import tree_digest
@@ -63,6 +68,12 @@ def _refresh_declared_dependencies(target: Path, staged: Path, manifest: dict, *
     from hermes_cli.runtime_state import _bytes
     from pm.plugin_declarations import read_python_declaration
     from pm.workspace import enabled_plugin_dirs, install_node_sidecar
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+
+    if startup_autofix_disabled():
+        raise pc.PluginOperationError(
+            "Plugin update may prepare dependencies; HERMES_DISABLE_AUTOFIX is set. "
+            "Authorize the plugin update with HERMES_DISABLE_AUTOFIX=0.")
 
     if (target / "node_modules").is_dir() and (staged / "package.json").is_file() and (
             not (staged / "node_modules").is_dir()

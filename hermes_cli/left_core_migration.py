@@ -582,6 +582,9 @@ def recover_at_startup(*, say: Optional[Callable[[str], None]] = None) -> list[s
     (an agent's startup-warning sink) outcomes are delivered now, together with any a gateway-start
     attempt queued for this home; without it they are logged and queued for the home's first agent.
     Returns installed plugin names."""
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled():
+        return []
     from agent.safe_worker_policy import worker_config_snapshot
     if worker_config_snapshot() is not None:
         # A frozen safe/ignore-user-config worker never reads the profile's config.yaml and never

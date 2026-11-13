@@ -1,5 +1,34 @@
 # Source update completion ownership
 
+## Startup autofix override (local carry)
+
+Startup maintenance is enabled by default. Set the process environment variable
+`HERMES_DISABLE_AUTOFIX=1` before launching Hermes to suppress implicit
+source-update completion, dependency repair, per-home boot migrations, bundled
+skill synchronization, missing-provider/plugin installation, on-demand PM
+installs, and unattended plugin auto-apply. Plugin selection changes are conservatively refused before PM starts:
+PM admission may recover an interrupted publication or rebuild dependencies even
+if a usable environment already exists. To authorize that maintenance, retry the
+specific plugin command with this override explicitly disabled for that process.
+This is a process-level override, not a profile setting: a gateway and its children inherit
+it, and a supervisor must set it in the service environment. `0` or an unset
+variable keeps upstream's default behavior. Explicit maintenance commands are not
+suppressed. The existing selected environment is used without a new startup
+currency or ownership check; an operator is responsible for its maintenance.
+Pending dependency-update markers are retained and reported. Interrupted checkout
+recovery in the checkout's own recovery module remains upstream behavior and can
+still modify the checkout even when this override is set.
+This does not disable ordinary operational writes (sessions, logs, databases),
+explicit user commands, or all possible plugin or tool side effects. With autofix
+enabled, upstream source completion may maintain all profiles and copy the
+default profile's `.env` into named profiles that lack one. The launcher must be
+regenerated from this patched version for its torn-checkout fallback to honour
+the switch; a launcher minted by an older version cannot enforce this guard.
+When an interrupted checkout makes the parser unavailable, recovery accepts
+`update` or `pm repair` with the known v0.22.5 global flags; unknown flags fail
+closed. Launcher republication is a deployment prerequisite, not something the
+new code can enforce while an older launcher is still in use.
+
 ## Phase seam
 
 The command process owns admission, the update lock and output lifetime, pre-update

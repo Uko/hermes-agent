@@ -465,6 +465,11 @@ def activate_dependencies(project_root: Path) -> None:
         # this process only reads the committed selection, so it proceeds without waiting rather
         # than leaving the backend unbound (see runtime_lock).
         with runtime_lock(project_root) as held:
+            from hermes_cli.startup_autofix import startup_autofix_disabled
+            if startup_autofix_disabled():
+
+                if (state / "publication.json").exists():
+                    raise RuntimeError("dependency publication is incomplete; run `hermes pm repair` explicitly")
             if held:
                 recover_publication(project_root)
             environment = committed_venv(project_root)

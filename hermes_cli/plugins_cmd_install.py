@@ -95,6 +95,12 @@ def _install_plugin_python_deps(
     if not has_python and not has_package_json:
         return True, None  # no declared deps at all
 
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled():
+        return False, _ConsentRefusal(
+            "HERMES_DISABLE_AUTOFIX blocks implicit plugin dependency preparation; "
+            "authorize the operation with HERMES_DISABLE_AUTOFIX=0", "other")
+
     # Node sidecar (package.json): the npm ci executor — separate consent
     # question, same try-then-enable posture. Failure never blocks the
     # python path below.
@@ -728,6 +734,10 @@ def _select_memory_provider(name: str, console, *, select: bool) -> None:
         console.print(
             f"[dim]Memory provider installed but not active. Run `hermes memory setup` "
             f"(or set memory.provider: {name}) to use it.[/dim]")
+        return
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled():
+        console.print("[red]Memory provider unchanged: HERMES_DISABLE_AUTOFIX blocks implicit dependency preparation.[/red]")
         return
     from hermes_cli.memory_setup import prepare_memory_provider_dependencies
     from plugins.memory import find_provider_dir

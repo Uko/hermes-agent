@@ -172,6 +172,16 @@ def lazy_installs_allowed() -> bool:
     """
     import os
 
+    # health: allow HX002 -- Package manager policy runs before profile config is trusted.
+    if os.environ.get("HERMES_DISABLE_AUTOFIX", "").strip().lower() in ("1", "true", "yes", "on"):
+        return False
+    return configured_lazy_installs_allowed()
+
+
+def configured_lazy_installs_allowed() -> bool:
+    """Read the existing lazy-install policy, ignoring the autofix override."""
+    import os
+
     if os.environ.get("HERMES_DISABLE_LAZY_INSTALLS", "").strip().lower() in (
         "1",
         "true",
@@ -189,7 +199,7 @@ def lazy_installs_allowed() -> bool:
         # security policy must not grant permission to acquire dependencies.
         require_readable_config_before_write()
         return cfg_get(load_config_readonly(), "security", "allow_lazy_installs", default=True) is True
-    except Exception:
+    except Exception:  # health: allow BLE001 -- Any configuration failure must refuse automatic installation.
         return False
 
 
@@ -212,10 +222,13 @@ def sealed() -> bool:
 def _refuse_lazy(name: str, what: str) -> InstallError:
     from pm import receipt
 
+    hint = ("HERMES_DISABLE_AUTOFIX is set; run `hermes pm install` explicitly where supported, or "
+            "authorize this operation with HERMES_DISABLE_AUTOFIX=0 (other restrictions may still apply)" if explicit_autofix_disabled() else
+            "enable security.allow_lazy_installs or run `hermes pm install`")
     error = InstallError(
         name,
         f"not installed and lazy installs are disabled: {what}",
-        "enable security.allow_lazy_installs or run `hermes pm install`",
+        hint,
     )
     receipt.record_refusal("lazy-install", str(error))
     return error
@@ -671,7 +684,7 @@ def venv_is_current(*, extras: list[str] | None = None, plugins: Members | Candi
     return _runtime_state_matches(fact, stamp, project_root=root)
 
 
-def _feature_policy(extras: Optional[list[str]], *, repair: bool) -> tuple[list[str] | None, list[str] | None]:
+def _feature_policy(extras: Optional[list[str]], *, repair: bool, explicit: bool = False) -> tuple[list[str] | None, list[str] | None]:
     """Refuse extras this platform or a frozen bundle cannot carry; return (shipped, frozen)."""
     from pm.features import read_features
 
@@ -686,7 +699,8 @@ def _feature_policy(extras: Optional[list[str]], *, repair: bool) -> tuple[list[
     frozen = shipped
     # Without a frozen declaration, explicit source setup needs no policy
     # read: the config loader initializes/chmods unrelated user state.
-    if frozen is not None and not repair and lazy_installs_allowed():
+    if frozen is not None and not repair and (lazy_installs_allowed() or (
+            explicit and explicit_autofix_disabled() and configured_lazy_installs_allowed())):
         frozen = None
     if frozen is not None and extras:
         outside = sorted(set(extras) - set(frozen))
@@ -697,6 +711,11 @@ def _feature_policy(extras: Optional[list[str]], *, repair: bool) -> tuple[list[
                 "set (security.allow_lazy_installs is false)",
             )
     return shipped, frozen
+
+
+def explicit_autofix_disabled() -> bool:
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    return startup_autofix_disabled()
 
 
 @contextmanager
@@ -824,11 +843,15 @@ def sync_venv(extras: Optional[list[str]] = None, *, explicit: bool = False,
             raise ValueError("repair restores the recorded environment; it cannot change features or plugins")
         if evict_incompatible_plugins and (repair or plugins is not None or not explicit):
             raise ValueError("only an explicit sync of the discovered plugin selection may disable plugins")
-        shipped, frozen = _feature_policy(extras, repair=repair)
+        shipped, frozen = _feature_policy(extras, repair=repair, explicit=explicit)
         package = get_package("venv")
         from hermes_cli.runtime_state import recover_publication
         from pm.publication import StagedPlugin
         with _venv_install_lock(patient=explicit or repair):
+            if not explicit and not repair and explicit_autofix_disabled():
+                from pm.environments import install_state_dir
+                if (install_state_dir(paths.repo_root()) / "publication.json").exists():
+                    raise InstallError("venv", "pending publication requires explicit repair", "run `hermes pm repair`")
             recover_publication(paths.repo_root())
             change = _publication(plugins)
             if isinstance(change, StagedPlugin) and not change.active:

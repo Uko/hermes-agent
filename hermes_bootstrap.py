@@ -520,6 +520,13 @@ def _settle_interrupted_update() -> None:
         moved_aside = _root / "hermes_cli.hermes-update-old" / "_early_recovery.py"
         if not (_root / ".hermes-update-zip-swap").is_file() or not moved_aside.is_file():
             return  # not a torn update: the imports below report the real damage
+        # The moved-aside code can predate the opt-out; do not delegate an
+        # implicit recovery to it. A simple explicit maintenance command may.
+        # health: allow HX002 -- Bootstrap runs before profile configuration exists.
+        disabled = os.environ.get("HERMES_DISABLE_AUTOFIX", "").strip().lower() in ("1", "true", "yes", "on")
+        args = sys.argv[1:]
+        if disabled and args[:1] != ["update"] and args[:2] != ["pm", "repair"]:
+            raise SystemExit("hermes: interrupted update detected; checkout left unchanged. Run `hermes update` or `hermes pm repair` explicitly.")
         import types
 
         # The moved-aside directory stands in as ``hermes_cli`` (its ``__init__`` not run), so the

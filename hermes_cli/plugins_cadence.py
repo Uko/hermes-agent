@@ -115,6 +115,10 @@ def check_interval_hours(config_get: Callable | None = None) -> float:
 
 
 def auto_apply_enabled(config_get: Callable | None = None) -> bool:
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+
+    if startup_autofix_disabled():
+        return False
     if config_get is None:
         config_get = _default_config_get
     try:

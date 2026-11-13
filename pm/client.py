@@ -11,7 +11,7 @@ import uuid
 
 from pm import paths, plugin_inputs
 from pm.package import InstallError, Runner, StatePackage
-from pm.plugin_inputs import Candidates, Members, PluginInput, Selection
+from pm.plugin_inputs import Candidates, Members, PluginInput, Selection, StagedUpdate
 from pm.runtime import is_runtime, runtime_command, runtime_environment
 from pm.worker_operations import OPERATIONS
 
@@ -217,6 +217,12 @@ def ensure(name, *, base_env=None, explicit=False, verify=True, progress=None, p
 def sync_venv(extras=None, *, explicit=False, plugins: PluginInput | None = None, repair=False,
               project_root: Path | None = None, evict_incompatible_plugins: bool = False) -> None:
     from pm.environments import running_from_selected_environment
+
+    if isinstance(plugins, (Selection, StagedUpdate)):
+        from hermes_cli.startup_autofix import startup_autofix_disabled
+        if startup_autofix_disabled():
+            raise InstallError("venv", "plugin publication may modify dependencies; HERMES_DISABLE_AUTOFIX is set",
+                               "authorize the plugin operation with HERMES_DISABLE_AUTOFIX=0")
 
     if extras and not explicit and not repair and not running_from_selected_environment(
             paths.repo_root() if project_root is None else Path(project_root)):

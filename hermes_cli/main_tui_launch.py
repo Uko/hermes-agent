@@ -627,6 +627,9 @@ def _pin_kanban_board_env() -> None:
 def _sync_bundled_skills_quietly() -> None:
     """Seed ``~/.hermes/skills/`` with the bundled library (idempotent, milliseconds when synced).
     Failures are swallowed: skills are an enhancement, not a hard dependency."""
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled():
+        return
     with contextlib.suppress(Exception):
         from tools.skills_sync import sync_skills
         sync_skills(quiet=True)

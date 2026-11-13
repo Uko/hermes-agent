@@ -141,7 +141,9 @@ def _start_gateway_configure_logging(verbosity: Optional[int]) -> None:
         from tools.skills_sync import sync_skills
         sync_skills(quiet=True)
 
-    _best_effort(_sync_skills)
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if not startup_autofix_disabled():
+        _best_effort(_sync_skills)
 
     # Centralized logging (agent.log INFO+, errors.log WARNING+, gateway.log gateway-only); idempotent.
     from hermes_logging import setup_logging, _safe_stderr

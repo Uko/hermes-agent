@@ -1392,6 +1392,10 @@ def recover_if_needed(project_root: Path | None = None, argv: list[str] | None =
     """Ask PM to restore dependencies before activation; leave failed requests retryable."""
     global _UPDATE_RETRY_RECOVERED
 
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled() and not explicit:
+        return False
+
     root = _project_root() if project_root is None else Path(project_root).resolve()
     if not explicit and _pytest_owns_live_checkout(root):
         return False

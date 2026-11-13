@@ -10,6 +10,25 @@ from tests.hermes_cli.plugin_worker_support import (
 )
 
 
+def test_enable_disable_without_automatic_dependency_preparation(plugin_world, monkeypatch):
+    from pm import client
+
+    world = plugin_world
+    origin, _ = world.origin(name="trace-manifest")
+    key = "observability/trace-leaf"
+    shutil.copytree(origin, world.home / "plugins" / key)
+    config = world.home / "config.yaml"
+    config.write_text(yaml.safe_dump({"plugins": {"enabled": [], "disabled": [key]}}))
+    monkeypatch.setenv("HERMES_DISABLE_AUTOFIX", "1")
+    monkeypatch.setattr(client, "sync_venv", lambda **kw: pytest.fail("dependency preparation invoked"))
+    world.command("enable", name=key, no_allow_tool_override=True)
+    assert key in world.enabled()
+    assert key not in yaml.safe_load(config.read_text())["plugins"]["disabled"]
+    world.command("disable", name=key)
+    assert key not in world.enabled()
+    assert key in yaml.safe_load(config.read_text())["plugins"]["disabled"]
+
+
 @pytest.mark.parametrize("query", ["trace-leaf", "trace-manifest", "observability/trace-leaf"])
 def test_nested_enable_disable_and_composite_use_canonical_key(plugin_world, monkeypatch, query):
     from hermes_cli import plugins_cmd

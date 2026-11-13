@@ -1040,6 +1040,9 @@ def _sync_bundled_skills_for_startup() -> bool:
     storage. The git/ref stamp keeps post-update correctness: a changed
     checkout revision forces one real sync, then later starts skip it.
     """
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled():
+        return False
     if _is_termux_startup_environment() and not _termux_bundled_skills_sync_needed():
         return False
 

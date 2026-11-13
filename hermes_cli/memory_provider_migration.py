@@ -281,6 +281,11 @@ def migrate_all_homes(*, say: Callable[[str], None] = print) -> list[str]:
 def recover_at_startup(name: str, *, say: Optional[Callable[[str], None]] = None) -> bool:
     """Agent-init hook for a configured provider that resolved nowhere. One attempt per process per
     home and name; honours ``security.allow_lazy_installs`` because it installs code. True when installed."""
+    from hermes_cli.startup_autofix import startup_autofix_disabled
+    if startup_autofix_disabled():
+        if say is not None:
+            say(f"Memory provider '{name}' is missing; install it explicitly with `hermes plugins install {name}`.")
+        return False
     from hermes_constants import get_hermes_home, hermes_home_key
 
     home = get_hermes_home()

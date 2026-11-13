@@ -261,7 +261,8 @@ def step_provision_runtimes() -> dict:
     ensure/sync operations own freshness checks and publication under lock.
     """
     import pm
-    from pm.install import lazy_installs_allowed, sealed
+    from pm.install import configured_lazy_installs_allowed, lazy_installs_allowed, sealed
+    from hermes_cli.startup_autofix import startup_autofix_disabled
 
     problems = pm.drift()
     if not problems:
@@ -270,7 +271,7 @@ def step_provision_runtimes() -> dict:
         # A sealed payload's tools ship with the artifact; drift here is
         # an artifact build problem, not something to repair in place.
         return {"ok": True, "skipped": "sealed"}
-    if not lazy_installs_allowed():
+    if not (lazy_installs_allowed() or (startup_autofix_disabled() and configured_lazy_installs_allowed())):
         return {"ok": True, "skipped": "lazy-installs-disabled"}
 
     refreshed: list[str] = []
